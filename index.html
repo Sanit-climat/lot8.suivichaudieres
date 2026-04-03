@@ -227,6 +227,11 @@ body.readonly .readonly-badge { display:flex !important }
 .ss-option:hover,.ss-option.focused{background:#f0f4f8}
 .ss-option.selected{background:#e8f4fd;color:var(--primary);font-weight:600}
 .ss-option.hidden{display:none}
+/* SEARCHABLE SELECT IN MODAL FULL WIDTH */
+#intervResWrap, #intervLocWrap { width: 100% !important; }
+#intervResWrap .ss-input, #intervLocWrap .ss-input { width: 100%; }
+#intervResWrap .ss-dropdown, #intervLocWrap .ss-dropdown { width: 100%; }
+
 /* TOAST */
 .toast{position:fixed;bottom:20px;right:20px;background:var(--text);color:var(--white);padding:12px 20px;border-radius:10px;font-size:13px;z-index:2000;opacity:0;transition:opacity .3s;pointer-events:none}
 .toast.show{opacity:1}
@@ -353,6 +358,11 @@ body.readonly .readonly-badge { display:flex !important }
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
           <input type="text" id="locSearchInput" placeholder="🔍 Rechercher..." oninput="renderLocatairesTable()" style="padding:8px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px;outline:none;min-width:220px">
           <div class="ss-wrap" id="locFilterResWrap" style="min-width:220px"></div>
+          <select id="locFilterStatut" onchange="renderLocatairesTable()" style="padding:8px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px;outline:none;background:var(--white)">
+            <option value="all">Tous les statuts</option>
+            <option value="todo">⏳ Non réalisés</option>
+            <option value="done">✅ Réalisés</option>
+          </select>
           <select id="locSortBy" onchange="renderLocatairesTable()" style="padding:8px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px;outline:none;background:var(--white)">
             <option value="nom">Trier : Nom A→Z</option>
             <option value="nom_desc">Trier : Nom Z→A</option>
@@ -725,13 +735,11 @@ body.readonly .readonly-badge { display:flex !important }
   <div class="modal-form">
     <div class="form-group full">
       <label>Résidence *</label>
-      <select id="intervResIdx" onchange="updateIntervLocSelect()"></select>
+      <div class="ss-wrap" id="intervResWrap" style="width:100%"></div>
     </div>
     <div class="form-group full">
       <label>Locataire *</label>
-      <select id="intervLocIdx">
-        <option value="">— Sélectionner un locataire —</option>
-      </select>
+      <div class="ss-wrap" id="intervLocWrap" style="width:100%"></div>
     </div>
     <div class="form-group">
       <label>Date d'intervention *</label>
@@ -2041,14 +2049,28 @@ function toggleEquipDone(k, val) {
 
 function renderLocatairesTable() {
   initLocModalSelects();
+  // Réinitialiser le filtre résidence si le div est vide
+  const wrap = document.getElementById('locFilterResWrap');
+  if (wrap && !wrap.querySelector('.ss-input') && RESIDENCES_DATA.length > 0) {
+    const allOpts = RESIDENCES_DATA.map((res, i) => ({ value: i, label: res.nom }));
+    ssSetOptions('locFilterResWrap', allOpts, 'Toutes les résidences', () => renderLocatairesTable());
+  }
   const q = (document.getElementById('locSearchInput')?.value || '').toLowerCase();
   const riFilter = ssGetValue('locFilterResWrap');
+  const statutFilter = document.getElementById('locFilterStatut')?.value || 'all';
   const all = getMergedLocataires();
   let filtered = all.filter(loc => {
     if (riFilter !== '' && String(loc._resIdx) !== riFilter) return false;
     if (q) {
       const hay = (loc.nom + loc.ref + loc.adresse + loc._resNom + (loc.chaudiere||'')).toLowerCase();
       if (!hay.includes(q)) return false;
+    }
+    if (statutFilter !== 'all') {
+      const k = `r${loc._resIdx}_l${loc._locIdx}`;
+      const dEntry = dbData[k] || {};
+      const done = !!dEntry.done || !!(SEED_LOT8[k]?.done && dEntry.done !== false);
+      if (statutFilter === 'todo' && done) return false;
+      if (statutFilter === 'done' && !done) return false;
     }
     return true;
   });
@@ -2318,70 +2340,81 @@ function startListeningInterventions() {
 }
 
 function initIntervSelects() {
-  // Le filtre résidence du tab interventions est géré par initAllSearchableSelects()
-  // Select résidence dans la modale
-  const modalRes = document.getElementById('intervResIdx');
-  if (modalRes && modalRes.options.length === 0) {
-    RESIDENCES_DATA.forEach((res, i) => {
-      const opt = document.createElement('option');
-      opt.value = i;
-      opt.textContent = res.nom;
-      modalRes.appendChild(opt);
-    });
-    // Pré-charger les locataires de la première résidence
-    updateIntervLocSelect();
-  }
+  // Legacy – handled by initIntervModalSearchableSelects
 }
 
-window.updateIntervLocSelect = function() {
-  const ri = parseInt(document.getElementById('intervResIdx').value);
-  const selLoc = document.getElementById('intervLocIdx');
-  selLoc.innerHTML = '<option value="">— Sélectionner un locataire —</option>';
-  if (isNaN(ri)) return;
-  const res = RESIDENCES_DATA[ri];
-  if (!res) return;
+function buildIntervLocOptions(ri) {
+  const opts = [];
+  if (isNaN(ri) || ri === '' || ri === null) return opts;
+  const res = RESIDENCES_DATA[parseInt(ri)];
+  if (!res) return opts;
   res.locataires.forEach((loc, li) => {
     const delKey = `del_r${ri}_l${li}`;
     if (locOverrides[delKey]) return;
     const over = locOverrides[`r${ri}_l${li}`] || {};
     const nom = over.nom || loc.nom;
     const lgt = over.lgt || loc.lgt || li;
-    const opt = document.createElement('option');
-    opt.value = li;
-    opt.textContent = `${nom} — Lgt ${lgt}`;
-    selLoc.appendChild(opt);
+    opts.push({ value: li, label: `${nom} — Lgt ${lgt}` });
   });
+  return opts;
+}
+
+function initIntervModalSearchableSelects(selectedResIdx, selectedLocIdx) {
+  const resOpts = RESIDENCES_DATA.map((res, i) => ({ value: i, label: res.nom }));
+  _ssState['intervResWrap'] = selectedResIdx !== null && selectedResIdx !== undefined && selectedResIdx !== ''
+    ? { value: String(selectedResIdx), label: RESIDENCES_DATA[selectedResIdx]?.nom || '— Sélectionner une résidence —' }
+    : { value: '', label: '— Sélectionner une résidence —' };
+  createSearchableSelect('intervResWrap', resOpts, '— Sélectionner une résidence —', (val) => {
+    const ri = val !== '' ? parseInt(val) : NaN;
+    const locOpts = buildIntervLocOptions(ri);
+    _ssState['intervLocWrap'] = { value: '', label: '— Sélectionner un locataire —' };
+    createSearchableSelect('intervLocWrap', locOpts, '— Sélectionner un locataire —', null);
+  });
+  const locOpts = selectedResIdx !== '' && selectedResIdx !== null
+    ? buildIntervLocOptions(parseInt(selectedResIdx)) : [];
+  if (selectedLocIdx !== null && selectedLocIdx !== undefined && selectedLocIdx !== '' && selectedResIdx !== '' && selectedResIdx !== null) {
+    const ri = parseInt(selectedResIdx);
+    const li = parseInt(selectedLocIdx);
+    const res = RESIDENCES_DATA[ri];
+    const loc = res?.locataires[li];
+    const over = locOverrides[`r${ri}_l${li}`] || {};
+    const nom = over.nom || loc?.nom || '';
+    const lgt = over.lgt || loc?.lgt || li;
+    _ssState['intervLocWrap'] = { value: String(selectedLocIdx), label: `${nom} — Lgt ${lgt}` };
+  } else {
+    _ssState['intervLocWrap'] = { value: '', label: '— Sélectionner un locataire —' };
+  }
+  createSearchableSelect('intervLocWrap', locOpts, '— Sélectionner un locataire —', null);
+}
+
+window.updateIntervLocSelect = function() {
+  // Legacy – handled by initIntervModalSearchableSelects
 }
 
 window.openIntervModal = function(key) {
-  initIntervSelects();
   const overlay = document.getElementById('intervModalOverlay');
   if (key) {
-    // Edit
     intervModalKey = key;
     document.getElementById('intervModalTitle').textContent = '✏️ Modifier intervention';
     const d = intervData[key] || {};
-    document.getElementById('intervResIdx').value = d.resIdx || 0;
-    updateIntervLocSelect();
-    setTimeout(() => {
-      document.getElementById('intervLocIdx').value = d.locIdx !== undefined ? d.locIdx : '';
-    }, 50);
     document.getElementById('intervDate').value = d.date || '';
     document.getElementById('intervTechnicien').value = d.technicien || '';
     document.getElementById('intervType').value = d.type || '';
     document.getElementById('intervResultat').value = d.resultat || '';
     document.getElementById('intervComment').value = d.comment || '';
+    initIntervModalSearchableSelects(
+      d.resIdx !== undefined ? d.resIdx : '',
+      d.locIdx !== undefined ? d.locIdx : ''
+    );
   } else {
-    // Create
     intervModalKey = null;
     document.getElementById('intervModalTitle').textContent = '🔧 Nouvelle intervention';
-    document.getElementById('intervResIdx').value = 0;
-    updateIntervLocSelect();
     document.getElementById('intervDate').value = new Date().toISOString().split('T')[0];
     document.getElementById('intervTechnicien').value = '';
     document.getElementById('intervType').value = '';
     document.getElementById('intervResultat').value = '';
     document.getElementById('intervComment').value = '';
+    initIntervModalSearchableSelects('', '');
   }
   overlay.classList.add('open');
 }
@@ -2393,8 +2426,10 @@ window.closeIntervModal = function() {
 
 window.saveIntervention = function() {
   if (isReadOnly) return;
-  const ri = parseInt(document.getElementById('intervResIdx').value);
-  const li = parseInt(document.getElementById('intervLocIdx').value);
+  const riStr = ssGetValue('intervResWrap');
+  const liStr = ssGetValue('intervLocWrap');
+  const ri = riStr !== '' ? parseInt(riStr) : NaN;
+  const li = liStr !== '' ? parseInt(liStr) : NaN;
   const date = document.getElementById('intervDate').value;
 
   if (isNaN(ri) || isNaN(li) || !date) {
@@ -2696,9 +2731,14 @@ function openBailleurView() {
         .filter(d => d.resIdx === loc._resIdx && d.locIdx === loc._locIdx)
         .sort((a,b) => (b.date||'').localeCompare(a.date||''));
       const lastInterv = intervs[0];
-      const intervCell = lastInterv
-        ? `${fmtDate(lastInterv.date)}<br><small>${RESULTAT_LABELS[lastInterv.resultat] || '—'}</small>`
-        : '—';
+      let intervCell;
+      if (lastInterv) {
+        intervCell = `${fmtDate(lastInterv.date)}<br><small>${RESULTAT_LABELS[lastInterv.resultat] || '—'}</small>`;
+      } else if (done && d.date) {
+        intervCell = `${fmtDate(d.date)}<br><small>—</small>`;
+      } else {
+        intervCell = '—';
+      }
 
       rows += `<tr>
         <td>${loc.ref || '—'}</td>
