@@ -2458,23 +2458,64 @@ window.saveIntervention = function() {
     updatedBy: currentUser?.email || ''
   };
 
+  // Calculer la date du prochain entretien (date + 1 an)
+  let dateProchain = '';
+  try {
+    const d = new Date(date);
+    if (!isNaN(d.getTime())) {
+      const next = new Date(d);
+      next.setFullYear(next.getFullYear() + 1);
+      dateProchain = next.toISOString().slice(0, 10);
+    }
+  } catch(e) {}
+
+  const k = getKey(ri, li);
+  // L'entretien est considéré "fait" si le résultat est Conforme ou Non conforme
+  const isIntervFaite = (data.resultat === 'ok' || data.resultat === 'nok');
+
   if (intervModalKey) {
     db.ref(`lot1_interventions/${intervModalKey}`).update(data);
+    if (isIntervFaite) {
+      db.ref(`lot1/${k}`).update({
+        done: true,
+        doneAt: data.updatedAt,
+        doneBy: data.updatedBy,
+        date,
+        dateProchain,
+        comment: data.comment || ''
+      });
+      db.ref(`lot8_locataires/${k}`).update({
+        dateEntretienPrec: date,
+        dateProchainEntretien: dateProchain,
+        dateEntretien2026: dateProchain,
+        entretienFait: 'OUI'
+      });
+    }
     showToast('✅ Intervention modifiée !');
   } else {
     const uid = Date.now().toString(36) + Math.random().toString(36).slice(2,6);
     data.createdAt = data.updatedAt;
     data.createdBy = data.updatedBy;
     db.ref(`lot1_interventions/${uid}`).set(data);
-    // Marquer aussi l'entretien comme fait dans lot1/
-    const k = getKey(ri, li);
+    // Marquer aussi l'entretien comme fait dans lot1/ (statut technique)
     db.ref(`lot1/${k}`).update({
       done: true,
       doneAt: data.createdAt,
       doneBy: data.updatedBy,
       date,
+      dateProchain,
       comment: data.comment || document.getElementById('intervComment').value.trim()
     });
+    // ET propager les dates dans lot8_locataires/ pour que l'onglet Locataires
+    // affiche Dernier entretien / Prochain entretien et le statut "OUI"
+    if (isIntervFaite) {
+      db.ref(`lot8_locataires/${k}`).update({
+        dateEntretienPrec: date,
+        dateProchainEntretien: dateProchain,
+        dateEntretien2026: dateProchain,
+        entretienFait: 'OUI'
+      });
+    }
     showToast('✅ Intervention enregistrée !');
   }
   closeIntervModal();
