@@ -2476,7 +2476,7 @@ window.saveIntervention = function() {
   if (intervModalKey) {
     db.ref(`lot1_interventions/${intervModalKey}`).update(data);
     if (isIntervFaite) {
-      db.ref(`lot1/${k}`).update({
+      db.ref(`lot8/${k}`).update({
         done: true,
         doneAt: data.updatedAt,
         doneBy: data.updatedBy,
@@ -2497,8 +2497,8 @@ window.saveIntervention = function() {
     data.createdAt = data.updatedAt;
     data.createdBy = data.updatedBy;
     db.ref(`lot1_interventions/${uid}`).set(data);
-    // Marquer aussi l'entretien comme fait dans lot1/ (statut technique)
-    db.ref(`lot1/${k}`).update({
+    // Marquer aussi l'entretien comme fait dans lot8/ (statut technique, lu par onglet Locataires)
+    db.ref(`lot8/${k}`).update({
       done: true,
       doneAt: data.createdAt,
       doneBy: data.updatedBy,
