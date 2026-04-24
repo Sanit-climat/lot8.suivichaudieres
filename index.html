@@ -1794,15 +1794,34 @@ window.saveLocataire = function() {
     const ri = parseInt(document.getElementById('locResIdx').value);
     const uid = Date.now().toString(36);
     const newKey = `new_${uid}`;
-    db.ref(`lot1_locataires/${newKey}`).set({ ...data, _resIdx: ri, _resNom: RESIDENCES_DATA[ri].nom });
+    db.ref(`lot8_locataires/${newKey}`).set({ ...data, _resIdx: ri, _resNom: RESIDENCES_DATA[ri].nom });
     showToast('✅ Locataire ajouté !');
   } else if (locModalMode === 'edit') {
     const key = `r${locModalResIdx}_l${locModalLocIdx}`;
-    db.ref(`lot1_locataires/${key}`).update(data);
+    const emptied = !data.dateEntretienPrec && !data.dateProchainEntretien && !data.dateEntretien2026;
+    if (emptied) {
+      // L'utilisateur a tout vidé → forcer la remise à zéro complète du statut
+      db.ref(`lot8_locataires/${key}`).update({
+        ...data,
+        entretienFait: '',
+        dateEntretienPrec: '',
+        dateProchainEntretien: '',
+        dateEntretien2026: ''
+      });
+      db.ref(`lot8/${key}`).update({
+        done: false,
+        date: '',
+        dateProchain: '',
+        doneAt: '',
+        doneBy: ''
+      });
+    } else {
+      db.ref(`lot8_locataires/${key}`).update(data);
+    }
     showToast('✅ Locataire modifié !');
   } else if (locModalMode === 'editnew') {
     const ri = parseInt(document.getElementById('locResIdx').value);
-    db.ref(`lot1_locataires/${locModalNewKey}`).update({ ...data, _resIdx: ri, _resNom: RESIDENCES_DATA[ri].nom });
+    db.ref(`lot8_locataires/${locModalNewKey}`).update({ ...data, _resIdx: ri, _resNom: RESIDENCES_DATA[ri].nom });
     showToast('✅ Locataire modifié !');
   }
   closeLocModal();
@@ -1818,10 +1837,10 @@ window.askDeleteLocataire = function(resIdx, locIdx, newKey) {
   document.getElementById('confirmMsg').textContent = `Supprimer "${nom}" ? Cette action est irréversible.`;
   confirmDeleteFn = () => {
     if (newKey) {
-      db.ref(`lot1_locataires/${newKey}`).update({ _deleted: true });
+      db.ref(`lot8_locataires/${newKey}`).update({ _deleted: true });
     } else {
       const delKey = `del_r${resIdx}_l${locIdx}`;
-      db.ref(`lot1_locataires/${delKey}`).set(true);
+      db.ref(`lot8_locataires/${delKey}`).set(true);
     }
     showToast('🗑️ Locataire supprimé.');
     closeConfirm();
