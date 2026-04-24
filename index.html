@@ -955,7 +955,12 @@ const SEED_LOC_OVERRIDES = {"r1_l0": {"dateProchainEntretien": "2026-01-30", "da
 
 function seedInitialData() {
   db.ref('lot1_seeded').once('value').then(snap => {
-    console.log('Seeding initial data (force)...');
+    // Si déjà seedé, on ne refait RIEN — sinon on écraserait les modifs de l'utilisateur
+    if (snap.val() === true) {
+      console.log('Seed déjà effectué, rien à faire.');
+      return;
+    }
+    console.log('Seeding initial data (première fois)...');
     const updates = {};
     // Statuts entretiens
     Object.entries(SEED_LOT8).forEach(([k, v]) => {
