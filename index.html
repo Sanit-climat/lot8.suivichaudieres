@@ -2477,9 +2477,6 @@ window.saveIntervention = function() {
   // L'entretien est considéré "fait" si le résultat est Conforme ou Non conforme
   const isIntervFaite = (data.resultat === 'ok' || data.resultat === 'nok');
 
-  // DEBUG — à retirer après vérification
-  console.log('[saveIntervention] résultat=', data.resultat, '| isIntervFaite=', isIntervFaite, '| key=', k, '| dateProchain=', dateProchain);
-
   if (intervModalKey) {
     db.ref(`lot1_interventions/${intervModalKey}`).update(data);
     if (isIntervFaite) {
@@ -2503,9 +2500,7 @@ window.saveIntervention = function() {
     const uid = Date.now().toString(36) + Math.random().toString(36).slice(2,6);
     data.createdAt = data.updatedAt;
     data.createdBy = data.updatedBy;
-    db.ref(`lot1_interventions/${uid}`).set(data)
-      .then(() => console.log('[saveIntervention] ✅ écriture lot1_interventions OK'))
-      .catch(e => console.error('[saveIntervention] ❌ erreur lot1_interventions:', e));
+    db.ref(`lot1_interventions/${uid}`).set(data);
     // Marquer aussi l'entretien comme fait dans lot8/ (statut technique, lu par onglet Locataires)
     db.ref(`lot8/${k}`).update({
       done: true,
@@ -2514,9 +2509,7 @@ window.saveIntervention = function() {
       date,
       dateProchain,
       comment: data.comment || document.getElementById('intervComment').value.trim()
-    })
-      .then(() => console.log('[saveIntervention] ✅ écriture lot8/' + k + ' OK'))
-      .catch(e => console.error('[saveIntervention] ❌ erreur lot8/' + k + ':', e));
+    });
     // ET propager les dates dans lot8_locataires/ pour que l'onglet Locataires
     // affiche Dernier entretien / Prochain entretien et le statut "OUI"
     if (isIntervFaite) {
@@ -2525,9 +2518,7 @@ window.saveIntervention = function() {
         dateProchainEntretien: dateProchain,
         dateEntretien2026: dateProchain,
         entretienFait: 'OUI'
-      })
-        .then(() => console.log('[saveIntervention] ✅ écriture lot8_locataires/' + k + ' OK'))
-        .catch(e => console.error('[saveIntervention] ❌ erreur lot8_locataires/' + k + ':', e));
+      });
     }
     showToast('✅ Intervention enregistrée !');
   }
@@ -2538,10 +2529,65 @@ window.deleteIntervention = function(key) {
   if (isReadOnly) return;
   const d = intervData[key];
   const nom = d?.locNom || 'cette intervention';
-  if (confirm(`Supprimer l'intervention pour "${nom}" du ${fmtDate(d?.date)} ?`)) {
-    db.ref(`lot1_interventions/${key}`).remove();
-    showToast('🗑️ Intervention supprimée.');
-  }
+  if (!confirm(`Supprimer l'intervention pour "${nom}" du ${fmtDate(d?.date)} ?`)) return;
+
+  const ri = d?.resIdx;
+  const li = d?.locIdx;
+  const k = (ri !== undefined && li !== undefined) ? `r${ri}_l${li}` : null;
+
+  db.ref(`lot1_interventions/${key}`).remove().then(() => {
+    // Y a-t-il encore une autre intervention "faite" (Conforme/Non conforme) pour ce locataire ?
+    if (!k) { showToast('🗑️ Intervention supprimée.'); return; }
+    const autresFaites = Object.entries(intervData || {})
+      .filter(([kk, v]) => kk !== key
+        && v.resIdx === ri && v.locIdx === li
+        && (v.resultat === 'ok' || v.resultat === 'nok'));
+
+    if (autresFaites.length === 0) {
+      // Plus d'intervention validée → on remet le locataire en "à faire"
+      db.ref(`lot8/${k}`).update({
+        done: false,
+        date: '',
+        dateProchain: '',
+        doneAt: '',
+        doneBy: ''
+      });
+      db.ref(`lot8_locataires/${k}`).update({
+        dateEntretienPrec: '',
+        dateProchainEntretien: '',
+        dateEntretien2026: '',
+        entretienFait: ''
+      });
+      showToast('🗑️ Intervention supprimée — statut remis à « en attente ».');
+    } else {
+      // Il reste au moins une intervention validée → on réaligne sur la plus récente
+      autresFaites.sort((a, b) => (b[1].date || '').localeCompare(a[1].date || ''));
+      const derniere = autresFaites[0][1];
+      let dp = '';
+      try {
+        const dd = new Date(derniere.date);
+        if (!isNaN(dd.getTime())) {
+          const nx = new Date(dd); nx.setFullYear(nx.getFullYear() + 1);
+          dp = nx.toISOString().slice(0, 10);
+        }
+      } catch(e) {}
+      db.ref(`lot8/${k}`).update({
+        done: true,
+        date: derniere.date || '',
+        dateProchain: dp
+      });
+      db.ref(`lot8_locataires/${k}`).update({
+        dateEntretienPrec: derniere.date || '',
+        dateProchainEntretien: dp,
+        dateEntretien2026: dp,
+        entretienFait: 'OUI'
+      });
+      showToast('🗑️ Intervention supprimée — dates réalignées sur la précédente.');
+    }
+  }).catch(e => {
+    console.error('[deleteIntervention] erreur:', e);
+    showToast('❌ Erreur lors de la suppression.');
+  });
 }
 
 const RESULTAT_LABELS = {
